@@ -62,7 +62,8 @@ class IbexSystem(idcode: Int) extends Module {
   ibex.io.scramble_key_i := 0.U
   ibex.io.scramble_nonce_i := 0.U
   ibex.io.debug_req_i := dm.io.debug_req_o(0)
-  ibex.io.fetch_enable_i := 0x5.U
+  // Set fetch_enable_i to MuBi4False (0x9) to prevent fetching from empty memory
+  ibex.io.fetch_enable_i := 0x9.U 
   ibex.io.scan_rst_ni := true.B
 
   // --- Memory ---
@@ -133,19 +134,30 @@ class IbexSystem(idcode: Int) extends Module {
   val ram_resp_to_core = RegNext(ram_sel_core)
   val ram_resp_to_instr = RegNext(ram_sel_instr)
 
+  // --- Default Slave (Error Slave) ---
+  // Catch-all for unmapped addresses to prevent core lockup
+  val unmapped_instr = !isDmAddr(ibex.io.instr_addr_o) && !isRamAddr(ibex.io.instr_addr_o)
+  val unmapped_data = !isDmAddr(ibex.io.data_addr_o) && !isRamAddr(ibex.io.data_addr_o)
+
+  val err_slave_gnt_instr = unmapped_instr && ibex.io.instr_req_o
+  val err_slave_gnt_data = unmapped_data && ibex.io.data_req_o
+  
+  val err_slave_rvalid_instr = RegNext(err_slave_gnt_instr)
+  val err_slave_rvalid_data = RegNext(err_slave_gnt_data)
+
   // --- Ibex Instr Port ---
-  ibex.io.instr_gnt_i := dm_slave_sel_instr || ram_sel_instr
-  ibex.io.instr_rvalid_i := (dm_slave_resp_to_instr && dm_slave_rvalid) || (ram_resp_to_instr && ram_rvalid)
+  ibex.io.instr_gnt_i := dm_slave_sel_instr || ram_sel_instr || err_slave_gnt_instr
+  ibex.io.instr_rvalid_i := (dm_slave_resp_to_instr && dm_slave_rvalid) || (ram_resp_to_instr && ram_rvalid) || err_slave_rvalid_instr
   ibex.io.instr_rdata_i := Mux(dm_slave_resp_to_instr, dm_slave_rdata, ram_rdata)
   ibex.io.instr_rdata_intg_i := 0.U
-  ibex.io.instr_err_i := false.B
+  ibex.io.instr_err_i := err_slave_rvalid_instr
 
   // --- Ibex Data Port ---
-  ibex.io.data_gnt_i := dm_slave_sel_core || ram_sel_core
-  ibex.io.data_rvalid_i := (dm_slave_resp_to_core && dm_slave_rvalid) || (ram_resp_to_core && ram_rvalid)
+  ibex.io.data_gnt_i := dm_slave_sel_core || ram_sel_core || err_slave_gnt_data
+  ibex.io.data_rvalid_i := (dm_slave_resp_to_core && dm_slave_rvalid) || (ram_resp_to_core && ram_rvalid) || err_slave_rvalid_data
   ibex.io.data_rdata_i := Mux(dm_slave_resp_to_core, dm_slave_rdata, ram_rdata)
   ibex.io.data_rdata_intg_i := 0.U
-  ibex.io.data_err_i := false.B
+  ibex.io.data_err_i := err_slave_rvalid_data
 
   // --- DM SBA Port ---
   dm.io.master_gnt_i := ram_sel_sba
