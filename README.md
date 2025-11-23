@@ -1,5 +1,8 @@
 # JTAG 菊花链仿真项目
 
+[Jtag底层OpenOCD命令](./jtag_commands.md)
+[Core集成进度](./with_core.md)
+
 本项目实现了一个基于 Chisel 的双 TAP JTAG 菊花链设计，并提供了 Verilator 仿真环境和 OpenOCD 配置文件，用于验证 JTAG 协议栈和菊花链拓扑。
 
 ## 依赖工具

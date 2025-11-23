@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <fcntl.h>
 
 // OpenOCD remote_bitbang 协议端口
 #define PORT 9823
@@ -17,9 +18,9 @@ double sc_time_stamp() {
 }
 
 int server_fd, new_socket;
+struct sockaddr_in address;
 
 void setup_socket() {
-    struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
 
@@ -83,60 +84,46 @@ int main(int argc, char** argv) {
     uint8_t prev_led2 = top->io_led2;
     printf("[Sim] Initial LED State -> LED1: 0x%02x, LED2: 0x%02x\n", prev_led1, prev_led2);
 
+    // Set socket to non-blocking
+    int flags = fcntl(new_socket, F_GETFL, 0);
+    fcntl(new_socket, F_SETFL, flags | O_NONBLOCK);
+
     char buffer[1];
     while (!Verilated::gotFinish()) {
-        ssize_t valread = read(new_socket, buffer, 1);
-        if (valread <= 0) {
-            // 连接关闭或错误
-            printf("Connection closed, waiting for new connection...\n");
-            close(new_socket);
-            // 重新接受连接
-            struct sockaddr_in address;
-            int addrlen = sizeof(address);
-            if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-                perror("accept");
-                exit(EXIT_FAILURE);
-            }
-            printf("OpenOCD re-connected!\n");
-            continue;
-        }
+        // Tick system clock
+        tick();
 
-        char cmd = buffer[0];
-        if (cmd >= '0' && cmd <= '7') {
-            // '0'-'7': 写入 TDI, TMS, TCK
-            // bit 0: TDI
-            // bit 1: TMS
-            // bit 2: TCK
-            int val = cmd - '0';
-            top->io_jtag_TDI = (val >> 0) & 1;
-            top->io_jtag_TMS = (val >> 1) & 1;
-            top->io_jtag_TCK = (val >> 2) & 1;
-            
-            // 立即评估模型以反映 JTAG 时钟变化
-            top->eval();
-            
-            // 检测 LED 变化并打印
-            if (top->io_led1 != prev_led1 || top->io_led2 != prev_led2) {
-                printf("[Sim] LED Update -> LED1: 0x%02x, LED2: 0x%02x\n", top->io_led1, top->io_led2);
-                prev_led1 = top->io_led1;
-                prev_led2 = top->io_led2;
+        // Check for JTAG commands
+        ssize_t valread = recv(new_socket, buffer, 1, 0);
+        if (valread > 0) {
+            char cmd = buffer[0];
+            if (cmd >= '0' && cmd <= '7') {
+                int val = cmd - '0';
+                top->io_jtag_TDI = (val >> 0) & 1;
+                top->io_jtag_TMS = (val >> 1) & 1;
+                top->io_jtag_TCK = (val >> 2) & 1;
+                top->eval(); // Evaluate JTAG logic immediately
+            } else if (cmd == 'R') {
+                char tdo = top->io_jtag_TDO ? '1' : '0';
+                send(new_socket, &tdo, 1, 0);
+            } else if (cmd == 'Q') {
+                break;
             }
-            
-            // 注意：这里不需要切换系统时钟 (top->clock)
-            // 因为 JTAG 逻辑是由 io_jtag_TCK 驱动的。
-            // 然而，如果有任何逻辑是由系统时钟驱动的，我们可能需要 tick 它。
-            // 在我们的设计中，JTAG 逻辑使用 withClock(TCK)，所以当 TCK 变化时 eval() 就足够了。
-            
-        } else if (cmd == 'R') {
-            // 读取 TDO
-            char tdo = top->io_jtag_TDO ? '1' : '0';
-            send(new_socket, &tdo, 1, 0);
-        } else if (cmd == 'Q') {
-            break;
-        } else if (cmd == 'B' || cmd == 'b') {
-            // Blink on/off - 忽略
-        } else if (cmd == 'r' || cmd == 's') {
-            // Reset - 忽略或实现 TRST
+        } else if (valread == 0) {
+             // Connection closed
+             printf("Connection closed, waiting for new connection...\n");
+             close(new_socket);
+             int addrlen = sizeof(address);
+             if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+                 perror("accept");
+                 exit(EXIT_FAILURE);
+             }
+             // Set new socket to non-blocking
+             flags = fcntl(new_socket, F_GETFL, 0);
+             fcntl(new_socket, F_SETFL, flags | O_NONBLOCK);
+             printf("OpenOCD re-connected!\n");
+        } else {
+            // No data (EAGAIN/EWOULDBLOCK), just continue ticking
         }
     }
 

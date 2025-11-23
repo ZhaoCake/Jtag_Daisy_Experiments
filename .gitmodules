@@ -1,0 +1,12 @@
+[submodule "ip/ibex"]
+	path = ip/ibex
+	url = https://github.com/lowRISC/ibex.git
+[submodule "ip/riscv-dbg"]
+	path = ip/riscv-dbg
+	url = https://github.com/pulp-platform/riscv-dbg.git
+[submodule "ip/common_cells"]
+	path = ip/common_cells
+	url = https://github.com/pulp-platform/common_cells.git
+[submodule "ip/tech_cells_generic"]
+	path = ip/tech_cells_generic
+	url = https://github.com/pulp-platform/tech_cells_generic.git
