@@ -1,48 +1,75 @@
 # JTAG 菊花链仿真项目
 
-[Jtag底层OpenOCD命令](./jtag_commands.md)
-[Core集成进度](./with_core.md)
+本项目实现了一个基于 Chisel 的双 Ibex RISC-V 核心 JTAG 菊花链设计，使用 PULP 的 riscv-dbg 作为调试模块，提供 Verilator 仿真环境和 OpenOCD 调试支持。
 
-本项目实现了一个基于 Chisel 的双 TAP JTAG 菊花链设计，并提供了 Verilator 仿真环境和 OpenOCD 配置文件，用于验证 JTAG 协议栈和菊花链拓扑。
+## 文档
 
-## 依赖工具
+- [调试指南](./docs/debugging_guide.md) - Telnet/GDB 调试详细说明
+- [OpenOCD JTAG 底层命令](./jtag_commands.md)
+- [OpenOCD RISC-V 调试架构](./docs/jtag_riscv_arch.md)
 
-*   **Mill**: Scala 构建工具
-*   **Verilator**: 开源 Verilog 仿真器
-*   **OpenOCD**: 调试软件 (需支持 `remote_bitbang` 驱动)
-*   **GCC/G++**: C++ 编译器
-
-## 运行步骤
-
-### 1. 启动仿真器
-
-在一个终端窗口中运行以下命令。这将编译 Chisel 代码，生成 Verilator 模型，并启动仿真服务器（监听端口 9823）。
+## 快速开始
 
 ```bash
-make run-jtag
-```
+# 1. 初始化子模块
+git submodule update --init --recursive
 
-等待终端显示：
-```
-Waiting for OpenOCD connection on port 9823...
-```
+# 2. 进入开发环境
+nix develop
 
-### 2. 启动 OpenOCD
+# 3. 编译测试程序
+cd sw && make && cd ..
 
-打开另一个终端窗口，运行 OpenOCD 连接到仿真器：
+# 4. 编译并启动仿真（终端1）
+make jtag-sim
+./build/sim_top
 
-```bash
+# 5. 启动 OpenOCD（终端2）
 openocd -f openocd.cfg
+
+# 6. 连接调试（终端3）
+telnet localhost 4444
 ```
 
-### 3. 观察结果
+## 架构
 
-*   **OpenOCD 终端**: 将显示扫描到的 TAP 设备 (`Tap1 found`, `Tap2 found`) 以及测试脚本的执行结果。
-*   **仿真器终端**: 将显示连接状态和仿真运行情况。
+```
+┌─────────────────────────────────────────────────────────┐
+│                      TopMain                            │
+│  ┌──────────────┐              ┌──────────────┐        │
+│  │  IbexSystem  │◄── JTAG ───►│  IbexSystem  │        │
+│  │  (core1)     │   Daisy     │  (core2)     │        │
+│  │              │   Chain     │              │        │
+│  │ ┌────────┐   │              │ ┌────────┐   │        │
+│  │ │  Ibex  │   │              │ │  Ibex  │   │        │
+│  │ └────────┘   │              │ └────────┘   │        │
+│  │ ┌────────┐   │              │ ┌────────┐   │        │
+│  │ │ dm_top │   │              │ │ dm_top │   │        │
+│  │ └────────┘   │              │ └────────┘   │        │
+│  │ ┌────────┐   │              │ ┌────────┐   │        │
+│  │ │  RAM   │   │              │ │  RAM   │   │        │
+│  │ └────────┘   │              │ └────────┘   │        │
+│  └──────────────┘              └──────────────┘        │
+└─────────────────────────────────────────────────────────┘
+          ▲
+          │ remote_bitbang (port 9823)
+          ▼
+      OpenOCD ──► Telnet (port 4444)
+                  GDB (port 3333/3334)
+```
 
-## 项目结构
+## 内存映射
 
-*   `playground/src/SingleJtag.scala`: 单个 JTAG TAP 控制器实现 (含 IDCODE 和用户数据寄存器)。
-*   `playground/src/TopMain.scala`: 顶层模块，实例化两个 TAP 并连接成菊花链。
-*   `csrc/sim_main.cpp`: Verilator 仿真主程序，包含 TCP 服务器以适配 OpenOCD remote_bitbang 协议。
-*   `openocd.cfg`: OpenOCD 配置文件，定义了菊花链拓扑和测试脚本。
+| 地址范围 | 描述 |
+|---------|------|
+| 0x00100000 - 0x0010FFFF | RAM (64KB) |
+| 0x1A110000 - 0x1A110FFF | Debug Module |
+
+## 依赖
+
+- Nix (推荐) 或手动安装: Mill, Verilator, OpenOCD, RISC-V 工具链
+
+## 已知问题
+
+- GDB 连接有超时警告，建议使用 Telnet 调试（功能完整）
+- 详见 [调试指南](./docs/debugging_guide.md#已知问题)
